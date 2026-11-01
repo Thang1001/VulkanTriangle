@@ -1,0 +1,41 @@
+/* Trang code của một khối: một cột đọc, code rộng hơn chữ */
+#page {
+  max-width: 920px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 64px;
+  display: grid; gap: 32px;
+}
+.top, .bottom { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.head { display: grid; gap: 10px; border-left: 5px solid var(--c); padding-left: 16px; }
+.head h1 { font-size: clamp(1.8rem, 4vw, 2.5rem); }
+.lede { color: var(--muted); font-size: 1.08rem; }
+.trapnote { background: var(--warn-soft); color: var(--ink); border-radius: 8px; padding: 10px 14px; font-size: 0.95rem; }
+h2 { font-size: 1.25rem; font-weight: 600; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; }
+.analogy { background: var(--accent-soft); border-radius: 10px; padding: 14px 16px; display: grid; gap: 4px; }
+.analogy .eyebrow { color: var(--accent); }
+.deps { display: grid; gap: 12px; align-content: start; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chip { font-size: 0.82rem; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); }
+.prose { display: grid; gap: 8px; max-width: 70ch; }
+.effect { border-radius: 10px; padding: 14px 16px; display: grid; gap: 4px; }
+.effect-fail { background: var(--err-soft); }
+.effect-hang { background: var(--err-soft); }
+.effect-warn { background: var(--warn-soft); }
+.effect .mono { font-size: 0.85rem; font-weight: 600; }
+.codes { display: grid; gap: 14px; }
+.codebox { display: grid; gap: 6px; min-width: 0; }
+.codebar { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--muted); }
+.btn.small { padding: 3px 10px; font-size: 0.78rem; }
+.callnote { color: var(--muted); font-size: 0.92rem; }
+.callnote code { background: var(--sunk); padding: 1px 6px; border-radius: 4px; color: var(--ink); }
+.notes dl { margin: 12px 0 0; display: grid; gap: 14px; }
+.notes dl > div { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.notes dt { font-weight: 600; font-size: 0.86rem; color: var(--c); overflow-wrap: anywhere; }
+.notes dd { margin: 0; }
+.pitfalls ul { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 6px; }
+@media (max-width: 680px) {
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+  .notes dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}

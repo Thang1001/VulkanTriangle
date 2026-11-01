@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Xưởng ghép Vulkan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend:wght@500;600;700&family=Be+Vietnam+Pro:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="assets/common.css">
+<style>
+/* Layout: thanh điều khiển trên cùng → 3 cột: kho khối | khung main() | màn hình + terminal → phần xuất code */
+.wrap {
+  max-width: 1360px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 24px 64px;
+  display: grid; gap: 24px;
+}
+.topbar { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; }
+.topbar h1 { font-size: clamp(1.6rem, 3.5vw, 2.2rem); }
+.topbar p { color: var(--muted); max-width: 70ch; font-size: 0.95rem; }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.seg { display: inline-flex; border: 1.5px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button { font: inherit; font-size: 0.85rem; font-weight: 600; border: 0; background: transparent; color: var(--muted); padding: 7px 12px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+
+.board { display: grid; grid-template-columns: 270px minmax(0, 1fr) 380px; gap: 20px; align-items: start; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.panel-head h2 { font-size: 1.05rem; }
+.count { font-size: 0.8rem; color: var(--muted); }
+
+/* Khối */
+.zone { display: grid; gap: 6px; min-height: 56px; border-radius: 10px; padding: 6px; transition: background 0.15s; }
+.zone.over { background: var(--accent-soft); }
+.zone .empty { color: var(--muted); font-size: 0.85rem; text-align: center; padding: 14px 8px; border: 1.5px dashed var(--line); border-radius: 8px; }
+.blk {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  background: var(--surface); border: 1.5px solid var(--line); border-left: 5px solid var(--c);
+  border-radius: 8px; padding: 7px 8px 7px 10px; cursor: grab; user-select: none;
+  transition: border-color 0.2s, background 0.2s, opacity 0.2s;
+}
+.blk.dragging { opacity: 0.35; }
+.blk .idx { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); width: 1.6em; text-align: right; }
+.blk .grip { color: var(--muted); font-size: 0.9rem; line-height: 1; }
+.blk-main { display: grid; min-width: 0; }
+.blk-title { font-weight: 600; font-size: 0.92rem; color: var(--ink); text-decoration: none; width: fit-content; }
+.blk-title:hover { color: var(--accent); text-decoration: underline; }
+.blk-sub { font-size: 0.78rem; color: var(--muted); line-height: 1.35; }
+.blk-fn { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); }
+.blk-tools { display: flex; gap: 2px; }
+.blk-tools button {
+  font: inherit; font-size: 0.8rem; width: 26px; height: 26px; border-radius: 6px; cursor: pointer;
+  border: 1px solid transparent; background: transparent; color: var(--muted);
+}
+.blk-tools button:hover { border-color: var(--line); color: var(--ink); background: var(--bg); }
+.blk.st-run { border-color: var(--accent); }
+.blk.st-ok { background: var(--ok-soft); }
+.blk.st-fail { background: var(--err-soft); border-color: var(--err); }
+.blk.st-warn { background: var(--warn-soft); border-color: var(--warn); }
+.marker { height: 3px; border-radius: 2px; background: var(--accent); margin: -1px 0; }
+
+/* Khung main() */
+.program { font-family: var(--font-mono); font-size: 0.85rem; display: grid; gap: 4px; }
+.program .line { color: var(--muted); white-space: pre; overflow-x: auto; }
+.program .line b { color: var(--ink); font-weight: 600; }
+.program .indent { padding-left: 18px; display: grid; gap: 4px; }
+.program .indent2 { padding-left: 36px; }
+.zone-label { font-family: var(--font-body); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
+.program .zone { font-family: var(--font-body); border: 1.5px dashed var(--line); }
+
+/* Màn hình + terminal */
+.monitor canvas { width: 100%; height: auto; aspect-ratio: 480 / 340; display: block; border-radius: 10px; }
+.term {
+  margin: 0; background: var(--code-bg); color: var(--code-ink); border-radius: 10px;
+  font-family: var(--font-mono); font-size: 0.74rem; line-height: 1.55; padding: 12px 14px;
+  height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.term .ok { color: #7fdbaa; }
+.term .err { color: #ff8b8b; }
+.term .warn { color: #f2c46d; }
+.term .dim { color: #7f8ba1; }
+.result { border-radius: 10px; padding: 12px 14px; display: grid; gap: 4px; background: var(--sunk); }
+.result h3 { font-size: 1rem; }
+.result p { font-size: 0.9rem; }
+.result .code { font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600; overflow-wrap: anywhere; }
+.result.k-ok { background: var(--ok-soft); }
+.result.k-fail, .result.k-hang { background: var(--err-soft); }
+.result.k-warn, .result.k-empty { background: var(--warn-soft); }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 0.78rem; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--c); margin-right: 5px; vertical-align: -1px; }
+
+/* Xuất code */
+.export { display: grid; gap: 12px; }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+.tabs button { font: inherit; font-family: var(--font-mono); font-size: 0.82rem; border: 0; background: transparent; color: var(--muted); padding: 8px 12px; cursor: pointer; border-bottom: 2.5px solid transparent; margin-bottom: -1px; }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.export-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.export pre.code { max-height: 560px; }
+.hint { color: var(--muted); font-size: 0.85rem; }
+
+@media (max-width: 1180px) {
+  .board { grid-template-columns: 250px minmax(0, 1fr); }
+  .board .out { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .board .out .panel-head, .board .out .result, .board .out .legend { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .board, .board .out { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div style="display:grid; gap:6px">
+      <span class="eyebrow">Học Vulkan bằng cách ghép khối</span>
+      <h1>Xưởng ghép Vulkan</h1>
+      <p>Kéo các khối từ kho vào khung <span class="mono">main()</span> theo thứ tự bạn nghĩ là đúng, rồi bấm <b>Chạy</b>. Ghép đúng thì tam giác hiện ra. Bấm vào tên khối để xem code chi tiết của nó. Trong kho có vài khối bẫy.</p>
+    </div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Hệ điều hành">
+        <button type="button" id="plat-mac" aria-pressed="true">macOS</button>
+        <button type="button" id="plat-win" aria-pressed="false">Windows</button>
+      </div>
+      <button class="btn" type="button" id="btn-shuffle">Xáo lại kho</button>
+      <button class="btn" type="button" id="btn-answer">Điền đáp án mẫu</button>
+      <button class="btn" type="button" id="btn-clear">Xóa hết</button>
+      <button class="btn primary" type="button" id="btn-run">▶ Chạy</button>
+    </div>
+  </div>
+
+  <div class="board">
+    <section class="panel">
+      <div class="panel-head"><h2>Kho khối</h2><span class="count" id="pal-count"></span></div>
+      <div class="zone" id="zone-palette" data-zone="palette"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Chương trình của bạn</h2><span class="count" id="prog-count"></span></div>
+      <div class="program">
+        <div class="line"><b>int</b> main() {</div>
+        <div class="indent">
+          <span class="zone-label">Khởi tạo · chạy một lần</span>
+          <div class="zone" id="zone-init" data-zone="init"></div>
+          <div class="line"><b>while</b> (!glfwWindowShouldClose(window)) {</div>
+          <div class="line indent2">glfwPollEvents();</div>
+          <div class="indent">
+            <span class="zone-label">Vòng lặp · chạy mỗi frame</span>
+            <div class="zone" id="zone-loop" data-zone="loop"></div>
+          </div>
+          <div class="line">}</div>
+          <div class="line">vkDeviceWaitIdle(device);</div>
+          <div class="line">cleanup();   <span style="color:var(--muted)">// tự sinh: hủy ngược thứ tự</span></div>
+        </div>
+        <div class="line">}</div>
+      </div>
+    </section>
+
+    <section class="panel out">
+      <div class="panel-head"><h2>Khi chạy</h2><span class="count" id="plat-label">macOS + MoltenVK</span></div>
+      <div class="monitor"><canvas id="monitor" width="480" height="340" aria-label="Màn hình mô phỏng"></canvas></div>
+      <pre class="term" id="term" aria-live="polite"></pre>
+      <div class="result" id="result"><h3>Chưa chạy</h3><p>Ghép xong thì bấm ▶ Chạy.</p></div>
+      <div class="legend">
+        <span style="--c: var(--p1)">Kết nối</span><span style="--c: var(--p2)">Nơi vẽ</span>
+        <span style="--c: var(--p3)">Cách vẽ</span><span style="--c: var(--p4)">Ra lệnh &amp; lặp</span>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel export" id="export" hidden>
+    <div class="panel-head"><h2>Code ghép từ các khối của bạn</h2><span class="count">Lệnh build trong build.sh dành cho macOS</span></div>
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <div class="export-actions">
+      <button class="btn" type="button" id="btn-copy">Copy</button>
+      <button class="btn" type="button" id="btn-download">Tải file này</button>
+      <span class="hint" id="export-hint"></span>
+    </div>
+    <pre class="code" id="export-code"></pre>
+  </section>
+</div>
+
+<script src="assets/blocks.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const ALL = BLOCKS.map((b) => b.id);
+const STORE = "vulkan-builder-v1";
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function shuffle(a) {
+  a = a.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE));
+    if (s && Array.isArray(s.init) && Array.isArray(s.loop) && Array.isArray(s.order)) {
+      const known = (id) => ALL.includes(id);
+      s.init = s.init.filter(known); s.loop = s.loop.filter(known);
+      s.order = [...s.order.filter(known), ...ALL.filter((id) => !s.order.includes(id))];
+      return s;
+    }
+  } catch (e) {}
+  return null;
+}
+function save() {
+  try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) {}
+}
+
+let state = load() || { init: [], loop: [], order: shuffle(ALL), platform: "mac" };
+let running = false;
+
+// ───────────── Vẽ danh sách khối ─────────────
+function blockEl(id, zone, index) {
+  const b = BY_ID[id];
+  const el = document.createElement("div");
+  el.className = "blk";
+  el.draggable = true;
+  el.dataset.id = id;
+  el.style.setProperty("--c", PHASES[b.phase].color);
+  const inProg = zone !== "palette";
+  el.innerHTML = `
+    ${inProg ? `<span class="idx">${zone === "init" ? index + 1 : "↻"}</span>` : `<span class="grip" aria-hidden="true">⋮⋮</span>`}
+    <div class="blk-main">
+      <a class="blk-title" href="blocks/${id}.html" target="_blank" rel="noopener" draggable="false" title="Mở code chi tiết">${b.title}</a>
+      ${inProg ? `<span class="blk-fn">${b.call}</span>` : `<span class="blk-sub">${b.short}</span>`}
+    </div>
+    <div class="blk-tools">
+      ${inProg
+        ? `<button type="button" data-act="up" title="Lên" aria-label="Đưa ${b.title} lên">↑</button>
+           <button type="button" data-act="down" title="Xuống" aria-label="Đưa ${b.title} xuống">↓</button>
+           <button type="button" data-act="remove" title="Trả về kho" aria-label="Trả ${b.title} về kho">×</button>`
+        : `<button type="button" data-act="add" title="Thêm vào cuối phần khởi tạo" aria-label="Thêm ${b.title}">+</button>`}
+    </div>`;
+  el.addEventListener("dragstart", (e) => {
+    dragId = id;
+    e.dataTransfer.setData("text/plain", id);
+    e.dataTransfer.effectAllowed = "move";
+    requestAnimationFrame(() => el.classList.add("dragging"));
+  });
+  el.addEventListener("dragend", () => { dragId = null; el.classList.remove("dragging"); clearMarkers(); });
+  el.querySelectorAll("button").forEach((btn) => btn.addEventListener("click", () => act(id, btn.dataset.act)));
+  return el;
+}
+
+function render() {
+  const placed = new Set([...state.init, ...state.loop]);
+  const palette = state.order.filter((id) => !placed.has(id));
+  const fill = (zoneEl, ids, zone, emptyText) => {
+    zoneEl.innerHTML = "";
+    ids.forEach((id, i) => zoneEl.appendChild(blockEl(id, zone, i)));
+    if (!ids.length) zoneEl.innerHTML = `<div class="empty">${emptyText}</div>`;
+  };
+  fill($("zone-palette"), palette, "palette", "Đã dùng hết khối");
+  fill($("zone-init"), state.init, "init", "Kéo khối vào đây");
+  fill($("zone-loop"), state.loop, "loop", "Kéo khối cần chạy mỗi frame vào đây");
+  $("pal-count").textContent = `${palette.length} khối`;
+  $("prog-count").textContent = `${placed.size} khối`;
+  $("plat-mac").setAttribute("aria-pressed", state.platform === "mac");
+  $("plat-win").setAttribute("aria-pressed", state.platform === "win");
+  $("plat-label").textContent = state.platform === "mac" ? "macOS + MoltenVK" : "Windows + driver GPU";
+}
+
+function changed() {
+  save(); render(); resetOutput();
+}
+
+function act(id, what) {
+  if (running) return;
+  const inInit = state.init.indexOf(id), inLoop = state.loop.indexOf(id);
+  if (what === "add") state.init.push(id);
+  if (what === "remove") removeFromProgram(id);
+  if (what === "up") {
+    if (inInit > 0) [state.init[inInit - 1], state.init[inInit]] = [state.init[inInit], state.init[inInit - 1]];
+    else if (inLoop === 0) { state.loop.shift(); state.init.push(id); }
+    else if (inLoop > 0) [state.loop[inLoop - 1], state.loop[inLoop]] = [state.loop[inLoop], state.loop[inLoop - 1]];
+  }
+  if (what === "down") {
+    if (inInit >= 0 && inInit < state.init.length - 1) [state.init[inInit + 1], state.init[inInit]] = [state.init[inInit], state.init[inInit + 1]];
+    else if (inInit === state.init.length - 1 && inInit >= 0) { state.init.pop(); state.loop.unshift(id); }
+    else if (inLoop >= 0 && inLoop < state.loop.length - 1) [state.loop[inLoop + 1], state.loop[inLoop]] = [state.loop[inLoop], state.loop[inLoop + 1]];
+  }
+  changed();
+}
+function removeFromProgram(id) {
+  state.init = state.init.filter((x) => x !== id);
+  state.loop = state.loop.filter((x) => x !== id);
+}
+
+// ───────────── Kéo thả ─────────────
+let dragId = null;
+function clearMarkers() {
+  document.querySelectorAll(".marker").forEach((m) => m.remove());
+  document.querySelectorAll(".zone.over").forEach((z) => z.classList.remove("over"));
+}
+function dropIndex(zoneEl, y) {
+  const items = [...zoneEl.querySelectorAll(".blk:not(.dragging)")];
+  for (let i = 0; i < items.length; i++) {
+    const r = items[i].getBoundingClientRect();
+    if (y < r.top + r.height / 2) return { index: i, before: items[i] };
+  }
+  return { index: items.length, before: null };
+}
+document.querySelectorAll(".zone").forEach((zoneEl) => {
+  zoneEl.addEventListener("dragover", (e) => {
+    if (!dragId || running) return;
+    e.preventDefault();
+    clearMarkers();
+    zoneEl.classList.add("over");
+    if (zoneEl.dataset.zone === "palette") return;
+    const { before } = dropIndex(zoneEl, e.clientY);
+    const m = document.createElement("div");
+    m.className = "marker";
+    const empty = zoneEl.querySelector(".empty");
+    if (empty) empty.before(m); else zoneEl.insertBefore(m, before);
+  });
+  zoneEl.addEventListener("dragleave", (e) => {
+    if (!zoneEl.contains(e.relatedTarget)) { zoneEl.classList.remove("over"); zoneEl.querySelectorAll(".marker").forEach((m) => m.remove()); }
+  });
+  zoneEl.addEventListener("drop", (e) => {
+    if (!dragId || running) return;
+    e.preventDefault();
+    const zone = zoneEl.dataset.zone;
+    const { index } = dropIndex(zoneEl, e.clientY);
+    const id = dragId;
+    clearMarkers();
+    removeFromProgram(id);
+    if (zone !== "palette") state[zone].splice(index, 0, id);
+    changed();
+  });
+});
+
+// ───────────── Mô phỏng chạy chương trình ─────────────
+const correctProvider = (r) => BLOCKS.find((b) => !b.trap && b.provides.includes(r));
+
+function simulate() {
+  const plat = state.platform;
+  const steps = [...state.init.map((id) => ({ id, zone: "init" })), ...state.loop.map((id) => ({ id, zone: "loop" }))];
+  const events = [];
+  const have = {};
+  const traps = [];
+  let windowOpen = false, drew = false, drawInInit = false;
+
+  const stop = (s, kind, title, msg, code) => {
+    events.push({ id: s.id, status: kind === "hang" ? "fail" : "fail", line: `✗ ${code || "Lỗi"}` });
+    return { events, windowOpen, outcome: { kind, title, msg, code, at: s.id } };
+  };
+
+  if (!steps.length)
+    return { events, windowOpen, outcome: { kind: "empty", title: "Chương trình trống", msg: "Kéo các khối từ kho vào khung main() trước đã." } };
+
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i], b = BY_ID[s.id];
+
+    if (s.zone === "loop" && !b.loopOnly)
+      return stop(s, "fail", `Khối “${b.title}” nằm trong vòng lặp`,
+        `Vòng lặp chạy khoảng 60 lần mỗi giây, nên ${b.call} tạo mới đối tượng 60 lần mỗi giây mà không hủy cái cũ. Bộ nhớ tăng liên tục, rồi validation layer báo lỗi vì đối tượng cũ vẫn đang được dùng. Kéo khối này lên phần Khởi tạo.`,
+        "Rò rỉ bộ nhớ: tạo lại đối tượng mỗi frame");
+
+    const miss = b.needs.find((r) => !have[r]);
+    if (miss) {
+      const later = steps.slice(i + 1).find((x) => BY_ID[x.id].provides.includes(miss));
+      const fix = correctProvider(miss);
+      const msg = later
+        ? `${b.call} cần ${RESOURCES[miss]}, nhưng khối tạo ra nó (“${BY_ID[later.id].title}”) lại nằm phía sau. Đưa “${BY_ID[later.id].title}” lên trước “${b.title}”.`
+        : `${b.call} cần ${RESOURCES[miss]}, nhưng chương trình chưa có khối nào tạo ra nó. Thêm khối “${fix.title}” từ kho.`;
+      return stop(s, "fail", `Dừng ở khối “${b.title}”`, msg, `Dùng ${RESOURCES[miss]} khi nó vẫn là VK_NULL_HANDLE → crash`);
+    }
+
+    const dup = b.provides.find((r) => have[r]);
+    if (dup)
+      return stop(s, "fail", `Khối “${b.title}” bị trùng`,
+        `“${b.title}” tạo lại ${RESOURCES[dup]}, thứ đã có từ khối “${BY_ID[have[dup]].title}”. Mỗi thứ chỉ cần tạo một lần. Tạo lại sẽ ghi đè biến cũ, đối tượng cũ bị rò rỉ. Trả một trong hai khối về kho.`,
+        "Hai khối làm cùng một việc");
+
+    // Hiệu ứng của khối bẫy đã chạy trước đó, lộ ra ở khối này
+    for (const t of traps) {
+      const ef = BY_ID[t].effect;
+      if (ef.at === b.id && ef.kind !== "warn")
+        return stop(s, ef.kind, ef.kind === "hang" ? "Chương trình bị treo" : `Dừng ở khối “${b.title}”`, ef.msg, ef.code);
+    }
+    if (b.effect && b.effect.at === b.id && (!b.effect.platform || b.effect.platform === plat))
+      return stop(s, b.effect.kind, `Dừng ở khối “${b.title}”`, b.effect.msg, b.effect.code);
+
+    if (b.trap) traps.push(b.id);
+    b.provides.forEach((r) => (have[r] = b.id));
+    if (b.provides.includes("window")) windowOpen = true;
+    if (b.id === "drawFrame") { drew = true; drawInInit = s.zone === "init"; }
+    let line = b.log;
+    if (b.id === "instance_noport" && plat === "win") line = "vkCreateInstance → VK_SUCCESS (Windows không cần portability)";
+    if (b.id === "physical" && plat === "win") line = "vkEnumeratePhysicalDevices → chọn GPU rời (NVIDIA/AMD)";
+    events.push({ id: s.id, status: "ok", line });
+  }
+
+  const missingLoop = !drew;
+  if (missingLoop)
+    return { events, windowOpen, outcome: { kind: "empty", title: "Không có gì được vẽ",
+      msg: windowOpen
+        ? "Chương trình chạy không lỗi và cửa sổ mở, nhưng không có lệnh vẽ nào được gọi nên cửa sổ trống. Kéo khối drawFrame() vào vòng lặp."
+        : "Chương trình chạy xong mà không có cửa sổ và không vẽ gì." } };
+  if (drawInInit)
+    return { events, windowOpen, outcome: { kind: "warn", title: "Gần đúng: chỉ vẽ một lần",
+      msg: "Tam giác được vẽ đúng 1 frame lúc khởi động, sau đó không vẽ lại nữa. Với ứng dụng thật (có chuyển động, đổi kích thước), hình sẽ đứng yên hoặc mất. Kéo drawFrame() xuống vòng lặp.", triangle: true } };
+  const warnTrap = traps.find((t) => BY_ID[t].effect.kind === "warn");
+  if (warnTrap)
+    return { events, windowOpen, outcome: { kind: "warn", title: "Gần đúng: có khối thừa", msg: BY_ID[warnTrap].effect.msg, triangle: true, at: warnTrap } };
+  return { events, windowOpen, outcome: { kind: "ok", title: "Tam giác đã hiện!", msg: "Chương trình ghép đúng. Toàn bộ code ở phần bên dưới.", triangle: true } };
+}
+
+// ───────────── Màn hình mô phỏng ─────────────
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+function triangle(ctx, x, y, w, h) {
+  x = Math.floor(x); y = Math.floor(y);
+  const A = [x + w / 2, y], B = [x + w, y + h], C = [x, y + h];
+  const img = ctx.getImageData(x, y, Math.ceil(w), Math.ceil(h));
+  const d = img.data, W = img.width, H = img.height;
+  const den = (B[1] - C[1]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[1] - C[1]);
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const X = x + px + 0.5, Y = y + py + 0.5;
+    const l1 = ((B[1] - C[1]) * (X - C[0]) + (C[0] - B[0]) * (Y - C[1])) / den;
+    const l2 = ((C[1] - A[1]) * (X - C[0]) + (A[0] - C[0]) * (Y - C[1])) / den;
+    const l3 = 1 - l1 - l2;
+    if (l1 < 0 || l2 < 0 || l3 < 0) continue;
+    const o = (py * W + px) * 4;
+    d[o] = 255 * l1; d[o + 1] = 255 * l2; d[o + 2] = 255 * l3; d[o + 3] = 255;
+  }
+  ctx.putImageData(img, x, y);
+}
+
+// mode: none | blank | triangle | hang | crash
+let monitorMode = "none";
+function drawMonitor(mode = monitorMode) {
+  monitorMode = mode;
+  const cv = $("monitor"), ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
+  ctx.fillStyle = cssVar("--sunk"); ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = "center";
+  if (mode === "none" || mode === "crash") {
+    ctx.fillStyle = cssVar("--muted"); ctx.font = "500 15px " + cssVar("--font-body");
+    ctx.fillText(mode === "none" ? "Chưa có cửa sổ" : "Chương trình đã thoát, cửa sổ đóng lại", W / 2, H / 2);
+    if (mode === "crash") { ctx.font = "500 13px " + cssVar("--font-mono"); ctx.fillText("exit code 1", W / 2, H / 2 + 24); }
+    return;
+  }
+  const fx = 24, fy = 20, fw = W - 48, fh = H - 40;
+  ctx.fillStyle = cssVar("--surface"); roundRect(ctx, fx, fy, fw, fh, 12); ctx.fill();
+  ctx.strokeStyle = cssVar("--line"); ctx.lineWidth = 2; ctx.stroke();
+  ["#ec6a5e", "#f4bf4f", "#61c554"].forEach((c, k) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(fx + 20 + k * 18, fy + 18, 5.5, 0, Math.PI * 2); ctx.fill(); });
+  ctx.fillStyle = cssVar("--muted"); ctx.font = "600 13px " + cssVar("--font-mono");
+  ctx.fillText("Basic Triangle", fx + fw / 2, fy + 22);
+  const cx = fx + 8, cy = fy + 38, cw = fw - 16, ch = fh - 46;
+  ctx.fillStyle = mode === "blank" ? "#20242c" : "#000"; roundRect(ctx, cx, cy, cw, ch, 6); ctx.fill();
+  if (mode === "triangle") {
+    const tw = ch * 0.92, th = ch * 0.72;
+    triangle(ctx, cx + (cw - tw) / 2, cy + (ch - th) / 2, tw, th);
+  }
+  if (mode === "hang") {
+    // con trỏ cầu vồng của macOS
+    const r = 18, ox = cx + cw / 2, oy = cy + ch / 2;
+    ["#f44", "#fa3", "#fd3", "#4c4", "#39f", "#a5f"].forEach((c, k) => {
+      ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(ox, oy);
+      ctx.arc(ox, oy, r, (k / 6) * Math.PI * 2, ((k + 1) / 6) * Math.PI * 2); ctx.fill();
+    });
+    ctx.fillStyle = "#9aa5b8"; ctx.font = "500 13px " + cssVar("--font-body");
+    ctx.fillText(state.platform === "mac" ? "Ứng dụng không phản hồi" : "(Not Responding)", ox, oy + 44);
+  }
+}
+
+// ───────────── Chạy ─────────────
+const sleep = (ms) => new Promise((r) => setTimeout(r, reduceMotion ? 0 : ms));
+function termLine(text, cls = "") {
+  const t = $("term");
+  const span = document.createElement("span");
+  if (cls) span.className = cls;
+  span.textContent = text + "\n";
+  t.appendChild(span);
+  t.scrollTop = t.scrollHeight;
+}
+function markBlock(id, st) {
+  document.querySelectorAll(`#zone-init .blk, #zone-loop .blk`).forEach((el) => {
+    if (el.dataset.id === id) { el.classList.remove("st-run", "st-ok", "st-fail", "st-warn"); if (st) el.classList.add("st-" + st); }
+  });
+}
+function resetOutput() {
+  $("term").innerHTML = "";
+  setResult({ kind: "", title: "Chưa chạy", msg: "Ghép xong thì bấm ▶ Chạy." });
+  $("export").hidden = true;
+  drawMonitor("none");
+}
+function setResult(o) {
+  const r = $("result");
+  r.className = "result" + (o.kind ? " k-" + o.kind : "");
+  r.innerHTML = `<h3></h3>${o.code ? `<p class="code"></p>` : ""}<p class="msg"></p>`;
+  r.querySelector("h3").textContent = o.title;
+  if (o.code) r.querySelector(".code").textContent = o.code;
+  r.querySelector(".msg").textContent = o.msg;
+  if (o.at) {
+    const a = document.createElement("a");
+    a.href = `blocks/${o.at}.html`; a.target = "_blank"; a.rel = "noopener";
+    a.textContent = `Xem code khối “${BY_ID[o.at].title}” →`;
+    a.style.fontSize = "0.88rem";
+    r.appendChild(a);
+  }
+}
+
+async function run() {
+  if (running) return;
+  render();
+  resetOutput();
+  running = true;
+  $("btn-run").disabled = true;
+  const { events, outcome } = simulate();
+  termLine("$ ./triangle", "dim");
+  let shownWindow = false;
+  for (const ev of events) {
+    const b = BY_ID[ev.id];
+    markBlock(ev.id, "run");
+    await sleep(240);
+    if (ev.status === "ok") {
+      termLine(`  ${b.call.padEnd(24)} ${ev.line}`, "ok");
+      markBlock(ev.id, "ok");
+      if (!shownWindow && b.provides.includes("window")) { shownWindow = true; drawMonitor("blank"); }
+    } else {
+      termLine(`  ${b.call.padEnd(24)} ${ev.line}`, "err");
+      markBlock(ev.id, "fail");
+    }
+  }
+  await sleep(200);
+  if (outcome.kind === "fail") {
+    termLine(`Lỗi: ${outcome.msg}`, "err");
+    drawMonitor(shownWindow ? "crash" : "none");
+  } else if (outcome.kind === "hang") {
+    termLine("  … (không có thêm dòng nào, chương trình đứng im)", "warn");
+    drawMonitor("hang");
+  } else if (outcome.kind === "empty") {
+    termLine("  (vòng lặp chạy, nhưng không có lệnh vẽ)", "warn");
+    drawMonitor(shownWindow ? "blank" : "none");
+  } else {
+    if (outcome.kind === "warn") { termLine(`Cảnh báo: ${outcome.msg}`, "warn"); if (outcome.at) markBlock(outcome.at, "warn"); }
+    if (outcome.kind === "warn" && state.init.includes("drawFrame")) markBlock("drawFrame", "warn");
+    drawMonitor("triangle");
+  }
+  setResult(outcome);
+  if (outcome.kind === "ok") showExport();
+  running = false;
+  $("btn-run").disabled = false;
+}
+
+// ───────────── Xuất code ─────────────
+let files = [], activeTab = 0;
+function showExport() {
+  files = [
+    { name: "main.cpp", lang: "cpp", text: assembleMain(state.init) },
+    { name: "shaders/triangle.vert", lang: "cpp", text: SHADER_VERT },
+    { name: "shaders/triangle.frag", lang: "cpp", text: SHADER_FRAG },
+    { name: "build.sh", lang: "sh", text: BUILD_SCRIPT },
+  ];
+  const tabs = $("tabs");
+  tabs.innerHTML = "";
+  files.forEach((f, i) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.role = "tab"; b.textContent = f.name;
+    b.addEventListener("click", () => selectTab(i));
+    tabs.appendChild(b);
+  });
+  selectTab(0);
+  $("export").hidden = false;
+}
+function selectTab(i) {
+  activeTab = i;
+  [...$("tabs").children].forEach((b, k) => b.setAttribute("aria-selected", k === i));
+  const f = files[i];
+  $("export-code").innerHTML = highlight(f.text, f.lang);
+  $("export-hint").textContent = `${f.text.split("\n").length} dòng`;
+}
+$("btn-copy").addEventListener("click", () => {
+  const btn = $("btn-copy");
+  navigator.clipboard.writeText(files[activeTab].text).then(
+    () => { btn.textContent = "Đã copy"; setTimeout(() => (btn.textContent = "Copy"), 1500); },
+    () => { btn.textContent = "Không copy được, hãy bôi đen để copy"; }
+  );
+});
+$("btn-download").addEventListener("click", () => {
+  const f = files[activeTab];
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([f.text], { type: "text/plain" }));
+  a.download = f.name.split("/").pop();
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+
+// ───────────── Nút điều khiển ─────────────
+$("btn-run").addEventListener("click", run);
+$("btn-shuffle").addEventListener("click", () => { if (!running) { state.order = shuffle(ALL); changed(); } });
+$("btn-clear").addEventListener("click", () => { if (!running) { state.init = []; state.loop = []; changed(); } });
+$("btn-answer").addEventListener("click", () => { if (!running) { state.init = CANONICAL.slice(); state.loop = CANONICAL_LOOP.slice(); changed(); } });
+$("plat-mac").addEventListener("click", () => { if (!running) { state.platform = "mac"; changed(); } });
+$("plat-win").addEventListener("click", () => { if (!running) { state.platform = "win"; changed(); } });
+
+render();
+resetOutput();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => drawMonitor());
+if (document.fonts) document.fonts.ready.then(() => drawMonitor());
+</script>
+</body>
+</html>

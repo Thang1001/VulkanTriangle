@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hành trình một tam giác Vulkan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend:wght@500;600;700&family=Be+Vietnam+Pro:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: phần mở đầu với 4 giai đoạn → bộ bấm từng bước (danh sách bước | chi tiết + màn hình mô phỏng) → vòng lặp mỗi frame */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --ink: #18202c;
+  --muted: #5a6577;
+  --line: #d8dee8;
+  --accent: #b3262b;
+  --accent-soft: #f6e3e3;
+  --p1: #2f6fb3;  /* Kết nối */
+  --p2: #b7791f;  /* Nơi vẽ */
+  --p3: #b3262b;  /* Cách vẽ */
+  --p4: #2f8a5b;  /* Ra lệnh & lặp */
+  --screen: #1b2230;
+  --screen-ink: #8f9bb0;
+  --font-display: "Lexend", "Be Vietnam Pro", system-ui, sans-serif;
+  --font-body: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151c; --surface: #1a2029; --ink: #e6eaf1; --muted: #9aa5b8; --line: #2c3442;
+    --accent: #ec6a6e; --accent-soft: #3a2224;
+    --p1: #6aa8ec; --p2: #e2a84d; --p3: #ec6a6e; --p4: #5cc28c;
+    --screen: #07090d; --screen-ink: #7f8aa0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151c; --surface: #1a2029; --ink: #e6eaf1; --muted: #9aa5b8; --line: #2c3442;
+  --accent: #ec6a6e; --accent-soft: #3a2224;
+  --p1: #6aa8ec; --p2: #e2a84d; --p3: #ec6a6e; --p4: #5cc28c;
+  --screen: #07090d; --screen-ink: #7f8aa0;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+}
+.wrap {
+  max-width: 1120px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 64px;
+  display: grid; gap: 56px;
+}
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.25; }
+h1 { font-size: clamp(1.9rem, 4.5vw, 2.8rem); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 1.5rem; font-weight: 600; }
+h3 { font-size: 1.15rem; font-weight: 600; }
+p { margin: 0; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+.eyebrow { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.lede { color: var(--muted); max-width: 62ch; font-size: 1.05rem; }
+
+/* Mở đầu */
+header { display: grid; gap: 14px; }
+.phases { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.phase {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; display: grid; gap: 6px; align-content: start;
+  border-top: 4px solid var(--c);
+}
+.phase .tag { font-family: var(--font-mono); font-size: 0.75rem; color: var(--c); font-weight: 600; }
+.phase p { color: var(--muted); font-size: 0.92rem; }
+.arrow-row { color: var(--muted); font-size: 0.9rem; }
+.arrow-row b { color: var(--ink); font-weight: 600; }
+
+/* Bộ bấm từng bước */
+.stepper { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 24px; align-items: start; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.steps button {
+  width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink);
+  font: inherit; font-size: 0.95rem; padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 8px; align-items: center;
+}
+.steps button:hover { background: var(--surface); }
+.steps button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.steps .num {
+  width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600;
+  border: 1.5px solid var(--c); color: var(--c); background: transparent;
+}
+.steps li.done .num { background: var(--c); color: var(--surface); }
+.steps li.current button { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--c); }
+.steps .phase-label { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--c); padding: 14px 10px 4px; }
+.steps .phase-label:first-child { padding-top: 0; }
+
+.detail { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: grid; gap: 22px; min-width: 0; }
+.detail-top { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 24px; align-items: start; }
+.detail-head { display: grid; gap: 8px; }
+.detail-head .eyebrow { color: var(--c); }
+.analogy { background: var(--accent-soft); border-radius: 10px; padding: 14px 16px; display: grid; gap: 4px; }
+.analogy .eyebrow { color: var(--accent); }
+.facts { display: grid; gap: 14px; }
+.fact { display: grid; gap: 2px; min-width: 0; }
+.fact .eyebrow { font-size: 0.7rem; }
+.vkname { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre; font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.55; }
+.needs { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 0.8rem; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.nav { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; }
+.btn {
+  font: inherit; font-weight: 600; font-size: 0.92rem; padding: 9px 16px; border-radius: 8px; cursor: pointer;
+  border: 1.5px solid var(--line); background: var(--surface); color: var(--ink);
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hint { color: var(--muted); font-size: 0.82rem; }
+
+.monitor { display: grid; gap: 8px; }
+.monitor canvas { width: 100%; height: auto; aspect-ratio: 520 / 380; max-width: 100%; display: block; border-radius: 10px; }
+.monitor .caption { font-size: 0.82rem; color: var(--muted); text-align: center; min-height: 2.6em; }
+.progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.progress div { height: 100%; background: var(--accent); width: 0; transition: width 0.35s ease; }
+
+/* Vòng lặp frame */
+.loop { display: grid; gap: 20px; }
+.loop-board { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: grid; gap: 20px; }
+.stages { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.stage { border: 1.5px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 2px; transition: border-color 0.25s, background 0.25s; }
+.stage.on { border-color: var(--accent); background: var(--accent-soft); }
+.stage .mono { color: var(--muted); font-size: 0.78rem; overflow-wrap: anywhere; }
+.canvases { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.img-slot { display: grid; gap: 8px; justify-items: center; text-align: center; }
+.img-slot canvas { width: 100%; max-width: 220px; aspect-ratio: 4 / 3; height: auto; border-radius: 8px; border: 2px solid var(--line); transition: border-color 0.25s, transform 0.25s; }
+.img-slot.role-show canvas { border-color: var(--p4); transform: translateY(-4px); }
+.img-slot.role-draw canvas { border-color: var(--p2); }
+.role { font-size: 0.82rem; font-weight: 600; padding: 2px 10px; border-radius: 999px; background: var(--bg); color: var(--muted); }
+.role-show .role { background: var(--p4); color: var(--surface); }
+.role-draw .role { background: var(--p2); color: var(--surface); }
+.loop-foot { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+.loop-text { color: var(--muted); font-size: 0.92rem; max-width: 70ch; min-height: 3.2em; }
+
+@media (max-width: 900px) {
+  .stepper { grid-template-columns: minmax(0, 1fr); }
+  .steps { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .steps .phase-label { grid-column: 1 / -1; }
+  .phases { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .detail-top { grid-template-columns: minmax(0, 1fr); }
+  .monitor { order: -1; max-width: 300px; }
+  .phases { grid-template-columns: minmax(0, 1fr); }
+  .stages, .canvases { grid-template-columns: minmax(0, 1fr); }
+  .img-slot { grid-template-columns: 120px minmax(0, 1fr); text-align: left; justify-items: start; align-items: center; }
+  .detail, .loop-board { padding: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="eyebrow">Vulkan cho người mới · macOS + MoltenVK</span>
+    <h1>Hành trình của một tam giác</h1>
+    <p class="lede">Vẽ một tam giác bằng Vulkan cần khoảng 14 bước. Nghe nhiều, nhưng mỗi bước chỉ trả lời một câu hỏi đơn giản. Để dễ hình dung, hãy coi chương trình như <b>một xưởng tranh</b>: GPU là họa sĩ, cửa sổ là bức tường treo tranh, còn bạn là người quản lý đưa ra yêu cầu.</p>
+    <p><a href="vulkan-builder.html" style="color:var(--accent); font-weight:600">Tự ghép các bước trong Xưởng ghép Vulkan →</a></p>
+  </header>
+
+  <section style="display:grid; gap:16px">
+    <h2>Bức tranh lớn: 4 giai đoạn</h2>
+    <div class="phases">
+      <div class="phase" style="--c: var(--p1)"><span class="tag">Bước 1–5</span><h3>Kết nối</h3><p>Mở cửa sổ, làm quen với Vulkan, chọn GPU và ký hợp đồng làm việc với nó.</p></div>
+      <div class="phase" style="--c: var(--p2)"><span class="tag">Bước 6–8</span><h3>Nơi vẽ</h3><p>Chuẩn bị các tấm toan để vẽ và quy trình dùng chúng.</p></div>
+      <div class="phase" style="--c: var(--p3)"><span class="tag">Bước 9–11</span><h3>Cách vẽ</h3><p>Viết công thức vẽ (shader), đúc thành dây chuyền, gắn với từng tấm toan.</p></div>
+      <div class="phase" style="--c: var(--p4)"><span class="tag">Bước 12–14</span><h3>Ra lệnh &amp; lặp</h3><p>Ghi phiếu việc, đặt đèn tín hiệu, rồi lặp: lấy toan, vẽ, treo lên.</p></div>
+    </div>
+    <p class="arrow-row">Bước 1–13 chỉ chạy <b>một lần</b> lúc khởi động. Bước 14 chạy <b>mỗi frame</b>, khoảng 60 lần mỗi giây.</p>
+  </section>
+
+  <section style="display:grid; gap:16px">
+    <h2>Đi qua từng bước</h2>
+    <div class="stepper">
+      <ol class="steps" id="steps"></ol>
+      <article class="detail" id="detail">
+        <div class="detail-top">
+          <div class="detail-head">
+            <span class="eyebrow" id="d-phase"></span>
+            <h3 id="d-title" style="font-size:1.45rem"></h3>
+            <p id="d-question" style="color:var(--muted)"></p>
+          </div>
+          <div class="monitor">
+            <canvas id="monitor" width="520" height="380" aria-label="Màn hình mô phỏng"></canvas>
+            <div class="progress"><div id="prog"></div></div>
+            <p class="caption" id="m-caption"></p>
+          </div>
+        </div>
+        <div class="analogy"><span class="eyebrow">Trong xưởng tranh</span><p id="d-analogy"></p></div>
+        <div class="facts">
+          <div class="fact"><span class="eyebrow">Thực chất là gì</span><p id="d-real"></p></div>
+          <div class="fact"><span class="eyebrow">Tên trong code</span><div class="vkname" id="d-code"></div></div>
+          <div class="fact"><span class="eyebrow">Cần có trước</span><div class="needs" id="d-needs"></div></div>
+        </div>
+        <div class="nav">
+          <button class="btn" id="prev" type="button">← Bước trước</button>
+          <span class="hint">Có thể dùng phím ← →</span>
+          <button class="btn primary" id="next" type="button">Bước tiếp →</button>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="loop">
+    <div style="display:grid; gap:8px">
+      <h2>Bước 14 phóng to: một vòng lặp mỗi frame</h2>
+      <p class="lede">Swapchain có vài tấm toan (thường là 3) dùng luân phiên. Người xem luôn nhìn thấy một tấm đã vẽ xong, trong khi GPU vẽ tấm khác ở phía sau. Nhờ vậy hình không bị nháy hay rách.</p>
+    </div>
+    <div class="loop-board">
+      <div class="stages">
+        <div class="stage" id="st0"><b>1. Acquire</b><span>Xin một tấm toan trống</span><span class="mono">vkAcquireNextImageKHR</span></div>
+        <div class="stage" id="st1"><b>2. Submit</b><span>Đưa phiếu việc cho GPU vẽ</span><span class="mono">vkQueueSubmit</span></div>
+        <div class="stage" id="st2"><b>3. Present</b><span>Treo tấm đã vẽ lên tường</span><span class="mono">vkQueuePresentKHR</span></div>
+      </div>
+      <div class="canvases" id="canvases"></div>
+      <div class="loop-foot">
+        <p class="loop-text" id="loop-text"></p>
+        <button class="btn" id="loop-toggle" type="button">Tạm dừng</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+const PH = {
+  1: { name: "Kết nối", c: "var(--p1)" },
+  2: { name: "Nơi vẽ", c: "var(--p2)" },
+  3: { name: "Cách vẽ", c: "var(--p3)" },
+  4: { name: "Ra lệnh & lặp", c: "var(--p4)" },
+};
+const STEPS = [
+  { p:1, t:"Cửa sổ", q:"Tranh sẽ hiện ở đâu?",
+    a:"Một bức tường trống, nơi sau này treo tranh.",
+    r:"Cửa sổ của hệ điều hành. Vulkan không tự tạo cửa sổ, nên ta dùng thư viện GLFW để tạo, và code này giống nhau trên Mac lẫn Windows.",
+    code:"glfwInit();\nglfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);\nwindow = glfwCreateWindow(800, 600, \"Triangle\", …);",
+    needs:[], m:"Cửa sổ đã mở, bên trong trống trơn." },
+  { p:1, t:"Instance", q:"Làm sao bắt đầu nói chuyện với Vulkan?",
+    a:"Đăng ký mở xưởng: khai tên xưởng và các dịch vụ cần dùng. Có thể mời thêm một “thầy giáo” (validation layer) đứng cạnh, ai làm sai là nhắc ngay.",
+    r:"Đối tượng đầu tiên, nối chương trình với thư viện Vulkan. Ở đây khai báo các extension cần dùng. Trên Mac phải thêm extension portability, nếu không sẽ không tìm thấy GPU.",
+    code:"VkInstanceCreateInfo info{};\ninfo.enabledExtensionCount = …;   // GLFW + portability\ninfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;\nvkCreateInstance(&info, nullptr, &instance);",
+    needs:["Cửa sổ"], m:"Chưa có gì để thấy. Mới đang làm quen." },
+  { p:1, t:"Surface", q:"Vulkan treo tranh lên cửa sổ bằng gì?",
+    a:"Gắn móc treo lên tường. Nhờ có móc, tranh từ xưởng mới treo được lên đúng bức tường này.",
+    r:"Cầu nối giữa Vulkan và cửa sổ. Trên Mac, bên dưới nó là một CAMetalLayer. GLFW tạo surface bằng một lệnh.",
+    code:"glfwCreateWindowSurface(instance, window, nullptr, &surface);\n// → VkSurfaceKHR",
+    needs:["Instance","Cửa sổ"], m:"Cửa sổ đã có móc treo, nhưng chưa có tranh." },
+  { p:1, t:"Physical device", q:"Họa sĩ nào sẽ vẽ?",
+    a:"Xem danh sách họa sĩ (GPU) có trong thị trấn, rồi chọn người vẽ được và treo được lên móc của bạn.",
+    r:"Một GPU thật trong máy. Ta liệt kê các GPU, kiểm tra GPU nào có hàng đợi vẽ, present được lên surface và hỗ trợ swapchain. Trên Mac thường chỉ có một GPU.",
+    code:"vkEnumeratePhysicalDevices(instance, &count, devices);\n// kiểm tra: queue graphics, present lên surface, VK_KHR_swapchain",
+    needs:["Instance","Surface"], m:"Đã chọn được GPU." },
+  { p:1, t:"Logical device + Queue", q:"Làm sao giao việc cho GPU?",
+    a:"Ký hợp đồng với họa sĩ đã chọn. Họa sĩ đưa bạn một khay nhận việc (queue): muốn giao việc thì bỏ phiếu vào khay.",
+    r:"Logical device là “phiên làm việc” của bạn với GPU; mọi đối tượng sau đều tạo từ nó. Queue là hàng đợi nhận lệnh: cần một queue để vẽ (graphics) và một queue để present (thường là cùng một queue).",
+    code:"vkCreateDevice(physicalDevice, &info, nullptr, &device);\nvkGetDeviceQueue(device, family, 0, &graphicsQueue);",
+    needs:["Physical device"], m:"Đã ký hợp đồng. GPU sẵn sàng nhận việc." },
+  { p:2, t:"Swapchain", q:"Vẽ lên cái gì, và làm sao tranh lên được màn hình?",
+    a:"Một xấp vài tấm toan dùng luân phiên: một tấm đang treo cho khách xem, những tấm khác đang vẽ hoặc chờ.",
+    r:"Một bộ ảnh (thường 2–3) gắn với surface. Ta chọn định dạng màu, kích thước bằng số pixel thật (chú ý màn Retina) và cách đổi ảnh (present mode, ví dụ FIFO = đồng bộ theo tần số quét màn hình).",
+    code:"vkCreateSwapchainKHR(device, &info, nullptr, &swapchain);\nvkGetSwapchainImagesKHR(device, swapchain, &n, images);",
+    needs:["Logical device","Surface"], m:"Đã có 3 tấm toan xếp phía sau, chưa vẽ gì." },
+  { p:2, t:"Image views", q:"Nhìn vào tấm toan theo cách nào?",
+    a:"Dán nhãn cho từng tấm toan: “đây là tranh 2D, tô màu”, để ai cầm lên cũng biết cách dùng.",
+    r:"Image chỉ là một vùng bộ nhớ. Image view mô tả cách đọc vùng đó: ảnh 2D, định dạng màu, dùng phần nào. Mỗi swapchain image cần một image view.",
+    code:"for (auto img : swapchainImages)\n    vkCreateImageView(device, &info, nullptr, &view);",
+    needs:["Swapchain"], m:"Mỗi tấm toan đã có nhãn." },
+  { p:2, t:"Render pass", q:"Một lần vẽ gồm những công đoạn nào?",
+    a:"Bản quy trình dán trên tường xưởng: lau toan về màu nền → vẽ → để sẵn đem đi treo.",
+    r:"Mô tả các ảnh sẽ dùng khi vẽ (attachment) và việc làm với chúng: lúc đầu xóa về một màu (loadOp = CLEAR), vẽ xong thì giữ lại (STORE) và chuyển sang trạng thái sẵn sàng present.",
+    code:"attachment.loadOp      = VK_ATTACHMENT_LOAD_OP_CLEAR;\nattachment.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;\nattachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;\nvkCreateRenderPass(device, &info, nullptr, &renderPass);",
+    needs:["Swapchain (định dạng màu)"], m:"Đã có quy trình: lau → vẽ → treo." },
+  { p:3, t:"Shaders", q:"Tam giác nằm ở đâu, tô màu gì?",
+    a:"Hai công thức cho họa sĩ. Công thức 1: chấm 3 điểm ở đâu. Công thức 2: mỗi điểm bên trong tô màu gì.",
+    r:"Hai chương trình nhỏ chạy trên GPU. Vertex shader tính vị trí của 3 đỉnh (có thể viết cứng ngay trong shader). Fragment shader tính màu cho từng pixel. Viết bằng GLSL, biên dịch trước sang SPIR-V.",
+    code:"// triangle.vert: 3 đỉnh viết cứng, lấy theo gl_VertexIndex\n// triangle.frag: outColor = vec4(màu, 1.0);\nglslc triangle.vert -o vert.spv\nvkCreateShaderModule(device, &info, nullptr, &module);",
+    needs:["Logical device"], m:"Đã có công thức, chưa vẽ thật." },
+  { p:3, t:"Graphics pipeline", q:"Gộp mọi cài đặt vẽ ở đâu?",
+    a:"Đúc một dây chuyền cố định: lắp sẵn 2 công thức và mọi lựa chọn (vẽ tam giác, tô kín, không trộn màu). Đúc thì tốn công, nhưng dùng thì rất nhanh.",
+    r:"Một đối tượng lớn chứa shader cùng toàn bộ trạng thái vẽ: kiểu hình (topology), rasterizer, blend, viewport… Tạo một lần lúc khởi động vì tạo rất tốn kém. Đây là đoạn code dài nhất.",
+    code:"inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;\nrasterizer.polygonMode = VK_POLYGON_MODE_FILL;\nvkCreatePipelineLayout(...);\nvkCreateGraphicsPipelines(device, …, &pipeline);",
+    needs:["Shaders","Render pass"], m:"Dây chuyền vẽ đã sẵn sàng." },
+  { p:3, t:"Framebuffers", q:"Quy trình áp vào tấm toan cụ thể nào?",
+    a:"Kẹp từng tấm toan vào giá vẽ theo đúng quy trình. Có 3 tấm thì cần 3 giá.",
+    r:"Framebuffer nối render pass với các image view cụ thể. Mỗi swapchain image có một framebuffer riêng.",
+    code:"for (auto view : swapchainImageViews)\n    vkCreateFramebuffer(device, &info, nullptr, &fb);",
+    needs:["Render pass","Image views"], m:"Mỗi tấm toan đã lên giá vẽ." },
+  { p:4, t:"Command pool + buffer", q:"Ra lệnh vẽ bằng cách nào?",
+    a:"Viết phiếu việc: “Lấy giá số i, lau toan màu đen, dùng dây chuyền này, vẽ 3 đỉnh.” Giấy lấy từ một tập giấy (pool).",
+    r:"Vulkan không vẽ ngay khi gọi lệnh. Ta ghi lệnh vào command buffer trước rồi mới gửi đi một lượt. Lệnh vẽ thật sự chỉ có một dòng: vkCmdDraw với 3 đỉnh.",
+    code:"vkCmdBeginRenderPass(cmd, &info, …);\nvkCmdBindPipeline(cmd, GRAPHICS, pipeline);\nvkCmdSetViewport / vkCmdSetScissor\nvkCmdDraw(cmd, 3, 1, 0, 0);   // ← vẽ tam giác!\nvkCmdEndRenderPass(cmd);",
+    needs:["Pipeline","Framebuffers"], m:"Phiếu việc đã viết xong, chưa gửi." },
+  { p:4, t:"Đồng bộ", q:"Làm sao không ai giẫm chân ai?",
+    a:"Đèn tín hiệu trong xưởng. Đèn 1: “toan đã trống, được vẽ”. Đèn 2: “vẽ xong, được treo”. Còn chuông (fence) báo cho bạn biết họa sĩ đã xong việc lần trước.",
+    r:"CPU và GPU chạy song song, không chờ nhau. Semaphore để các bước trên GPU chờ nhau (acquire → vẽ → present). Fence để CPU chờ GPU xong frame trước rồi mới ghi đè phiếu việc.",
+    code:"vkCreateSemaphore(...)  // imageAvailable, renderFinished\nvkCreateFence(...)      // inFlight (tạo ở trạng thái SIGNALED)",
+    needs:["Logical device"], m:"Đèn tín hiệu đã lắp. Mọi thứ đã sẵn sàng." },
+  { p:4, t:"drawFrame() — vòng lặp", q:"Cho tam giác hiện lên!",
+    a:"Mỗi lượt: chờ chuông → xin một tấm toan trống → bỏ phiếu việc vào khay → khi đèn “vẽ xong” bật, treo tranh lên tường. Lặp lại.",
+    r:"Hàm chạy mỗi frame, gồm 3 lệnh chính: Acquire, Submit, Present. Xem phần phóng to ở dưới.",
+    code:"vkWaitForFences(device, 1, &inFlight, …);\nvkAcquireNextImageKHR(device, swapchain, …, &i);\nvkQueueSubmit(graphicsQueue, …);\nvkQueuePresentKHR(presentQueue, …);",
+    needs:["Tất cả các bước trên"], m:"Tam giác đã hiện trên màn hình!" },
+];
+
+const $ = (id) => document.getElementById(id);
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let cur = 0;
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// Danh sách bước, chia theo giai đoạn
+const stepsEl = $("steps");
+let lastP = 0;
+STEPS.forEach((s, i) => {
+  if (s.p !== lastP) {
+    const lab = document.createElement("li");
+    lab.className = "phase-label";
+    lab.style.setProperty("--c", PH[s.p].c);
+    lab.textContent = PH[s.p].name;
+    stepsEl.appendChild(lab);
+    lastP = s.p;
+  }
+  const li = document.createElement("li");
+  li.dataset.i = i;
+  li.style.setProperty("--c", PH[s.p].c);
+  li.innerHTML = `<button type="button" id="step-${i}"><span class="num">${i + 1}</span><span>${s.t}</span></button>`;
+  li.querySelector("button").addEventListener("click", () => show(i));
+  stepsEl.appendChild(li);
+});
+
+function show(i) {
+  const prev = cur;
+  cur = Math.max(0, Math.min(STEPS.length - 1, i));
+  const s = STEPS[cur];
+  $("detail").style.setProperty("--c", PH[s.p].c);
+  $("d-phase").textContent = `Bước ${cur + 1} / ${STEPS.length} · ${PH[s.p].name}`;
+  $("d-title").textContent = s.t;
+  $("d-question").textContent = s.q;
+  $("d-analogy").textContent = s.a;
+  $("d-real").textContent = s.r;
+  $("d-code").textContent = s.code;
+  $("d-needs").innerHTML = s.needs.length
+    ? s.needs.map((n) => `<span class="chip">${n}</span>`).join("")
+    : `<span class="chip">Không cần gì, đây là điểm bắt đầu</span>`;
+  $("m-caption").textContent = s.m;
+  $("prog").style.width = `${((cur + 1) / STEPS.length) * 100}%`;
+  $("prev").disabled = cur === 0;
+  $("next").disabled = cur === STEPS.length - 1;
+  stepsEl.querySelectorAll("li[data-i]").forEach((li) => {
+    const k = +li.dataset.i;
+    li.classList.toggle("done", k < cur);
+    li.classList.toggle("current", k === cur);
+  });
+  // Tới bước cuối thì cho tam giác hiện dần
+  drawMonitor(cur === STEPS.length - 1 && prev !== cur && !reduceMotion ? 0.05 : 1);
+}
+$("prev").addEventListener("click", () => show(cur - 1));
+$("next").addEventListener("click", () => show(cur + 1));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight") show(cur + 1);
+  if (e.key === "ArrowLeft") show(cur - 1);
+});
+
+// Vẽ tam giác 3 màu (nội suy barycentric), giống tam giác mẫu kinh điển của Vulkan
+function triangle(ctx, x, y, w, h, alpha = 1) {
+  x = Math.floor(x); y = Math.floor(y);
+  const A = [x + w / 2, y], B = [x + w, y + h], C = [x, y + h];
+  const img = ctx.getImageData(x, y, Math.ceil(w), Math.ceil(h));
+  const d = img.data, W = img.width, H = img.height;
+  const den = (B[1] - C[1]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[1] - C[1]);
+  for (let py = 0; py < H; py++) {
+    for (let px = 0; px < W; px++) {
+      const X = x + px + 0.5, Y = y + py + 0.5;
+      const l1 = ((B[1] - C[1]) * (X - C[0]) + (C[0] - B[0]) * (Y - C[1])) / den;
+      const l2 = ((C[1] - A[1]) * (X - C[0]) + (A[0] - C[0]) * (Y - C[1])) / den;
+      const l3 = 1 - l1 - l2;
+      if (l1 < 0 || l2 < 0 || l3 < 0) continue;
+      const o = (py * W + px) * 4;
+      d[o]     = d[o]     * (1 - alpha) + 255 * l1 * alpha;
+      d[o + 1] = d[o + 1] * (1 - alpha) + 255 * l2 * alpha;
+      d[o + 2] = d[o + 2] * (1 - alpha) + 255 * l3 * alpha;
+      d[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, x, y);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Màn hình mô phỏng: cho thấy đã thấy được gì sau mỗi bước
+let monitorAnim = null;
+function drawMonitor(t = 1) {
+  cancelAnimationFrame(monitorAnim);
+  const cv = $("monitor"), ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  const screen = cssVar("--screen"), sink = cssVar("--screen-ink"), accent = cssVar("--accent");
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = cssVar("--bg"); ctx.fillRect(0, 0, W, H);
+
+  const fx = 20, fy = 28, fw = W - 50, fh = H - 48;
+  // Các tấm toan của swapchain xếp phía sau (từ bước 6)
+  if (cur >= 5) {
+    for (let k = 2; k >= 1; k--) {
+      ctx.fillStyle = screen; ctx.globalAlpha = 0.2 + 0.15 * (2 - k);
+      roundRect(ctx, fx + k * 10, fy - k * 9, fw, fh, 12); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  ctx.fillStyle = cssVar("--surface");
+  roundRect(ctx, fx, fy, fw, fh, 12); ctx.fill();
+  ctx.strokeStyle = cssVar("--line"); ctx.lineWidth = 2; ctx.stroke();
+  ["#ec6a5e", "#f4bf4f", "#61c554"].forEach((c, k) => {
+    ctx.fillStyle = c; ctx.beginPath(); ctx.arc(fx + 22 + k * 20, fy + 20, 6, 0, Math.PI * 2); ctx.fill();
+  });
+  ctx.fillStyle = cssVar("--muted"); ctx.font = "600 15px " + cssVar("--font-mono");
+  ctx.textAlign = "center"; ctx.fillText("Triangle", fx + fw / 2, fy + 25);
+
+  const cx = fx + 10, cy = fy + 42, cw = fw - 20, ch = fh - 52;
+  const last = cur === STEPS.length - 1;
+  ctx.fillStyle = last ? "#000" : screen;
+  roundRect(ctx, cx, cy, cw, ch, 6); ctx.fill();
+
+  if (last) {
+    const tw = ch * 0.95, th = ch * 0.75;
+    triangle(ctx, cx + (cw - tw) / 2, cy + (ch - th) / 2, tw, th, t);
+    if (t < 1) monitorAnim = requestAnimationFrame(() => drawMonitor(Math.min(1, t + 0.05)));
+  } else {
+    ctx.fillStyle = sink; ctx.font = "500 16px " + cssVar("--font-body");
+    const msg = cur === 0 ? "cửa sổ trống" : cur < 5 ? "đang chuẩn bị…" : cur < 11 ? "toan đã sẵn, chưa vẽ" : "sẵn sàng vẽ";
+    ctx.fillText(msg, cx + cw / 2, cy + ch / 2 - 4);
+    // Thanh nhỏ: mỗi vạch là một bước đã xong
+    const n = STEPS.length, gap = 14, start = cx + cw / 2 - (n * gap) / 2;
+    for (let k = 0; k < n; k++) {
+      ctx.fillStyle = k <= cur ? accent : sink;
+      ctx.globalAlpha = k <= cur ? 1 : 0.25;
+      ctx.fillRect(start + k * gap + 2, cy + ch / 2 + 18, 10, 4);
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ===== Vòng lặp frame =====
+const N = 3;
+const slots = [];
+const cvWrap = $("canvases");
+for (let k = 0; k < N; k++) {
+  const div = document.createElement("div");
+  div.className = "img-slot";
+  div.innerHTML = `<canvas width="220" height="165"></canvas><div><b class="mono">swapchain image ${k}</b><br><span class="role"></span></div>`;
+  cvWrap.appendChild(div);
+  slots.push({ el: div, cv: div.querySelector("canvas"), fill: 0 });
+}
+let shown = 0, drawing = 1, stage = 0, frameNo = 1;
+slots[0].fill = 1;
+
+function paintSlot(s) {
+  const ctx = s.cv.getContext("2d");
+  const W = s.cv.width, H = s.cv.height;
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+  if (s.fill > 0) triangle(ctx, W * 0.2, H * 0.15, W * 0.6, H * 0.7, s.fill);
+}
+
+function renderLoop() {
+  slots.forEach((s, k) => {
+    s.el.classList.toggle("role-show", k === shown);
+    s.el.classList.toggle("role-draw", k === drawing);
+    s.el.querySelector(".role").textContent =
+      k === shown ? "Đang trên màn hình"
+      : k === drawing ? (stage === 0 ? "Vừa lấy về, trống" : stage === 1 ? "GPU đang vẽ" : "Vẽ xong, sắp treo")
+      : "Chờ đến lượt";
+    paintSlot(s);
+  });
+  for (let k = 0; k < 3; k++) $("st" + k).classList.toggle("on", k === stage);
+  const texts = [
+    `Frame ${frameNo}: CPU xin swapchain một tấm trống và nhận về image ${drawing}. Màn hình vẫn đang hiện image ${shown}.`,
+    `Frame ${frameNo}: gửi command buffer lên GPU. GPU lau image ${drawing} về màu đen rồi vẽ tam giác.`,
+    `Frame ${frameNo}: vẽ xong, semaphore bật. Present: image ${drawing} được đưa lên màn hình, image ${shown} được trả về để dùng lại sau.`,
+  ];
+  $("loop-text").textContent = texts[stage];
+}
+
+function tickLoop() {
+  if (stage === 0) { stage = 1; }
+  else if (stage === 1) { slots[drawing].fill = 1; stage = 2; }
+  else {
+    shown = drawing;
+    drawing = (drawing + 1) % N;
+    slots[drawing].fill = 0;
+    stage = 0; frameNo++;
+  }
+  renderLoop();
+}
+renderLoop();
+
+let timer = null;
+const toggle = $("loop-toggle");
+function play() { timer = setInterval(tickLoop, 1600); toggle.textContent = "Tạm dừng"; }
+function pause() { clearInterval(timer); timer = null; toggle.textContent = "Chạy tiếp"; }
+if (reduceMotion) {
+  toggle.textContent = "Bước tiếp";
+  toggle.addEventListener("click", tickLoop);
+} else {
+  toggle.addEventListener("click", () => (timer ? pause() : play()));
+  play();
+}
+
+show(0);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => drawMonitor());
+if (document.fonts) document.fonts.ready.then(() => drawMonitor());
+</script>
+</body>
+</html>
